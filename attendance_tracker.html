@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Tracker</title>
+    <!-- Link to the manifest file -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Theme color for browser UI -->
+    <meta name="theme-color" content="#4f46e5">
+
+    <script src="https://cdn.tailwindcss.com/"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+        .day {
+            transition: all 0.2s ease-in-out;
+        }
+        .day:hover:not(.disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .present { background-color: #4ade80; color: white; } /* green-400 */
+        .absent { background-color: #f87171; color: white; } /* red-400 */
+        .disabled { background-color: #e5e7eb; color: #9ca3af; cursor: not-allowed; } /* gray-200, gray-400 */
+        .student-row.selected {
+            background-color: #dbeafe; /* blue-100 */
+            font-weight: 600;
+        }
+        .status-dropdown {
+             -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
+             background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div id="app" class="container mx-auto p-4 sm:p-6 md:p-8 max-w-7xl">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-900">Attendance Tracker</h1>
+            <p class="text-md text-gray-600 mt-2">Track attendance from September 16 to February 16</p>
+        </header>
+
+        <div class="bg-white p-6 rounded-2xl shadow-lg mb-8">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center mb-4 gap-4">
+                <h2 class="text-xl font-semibold text-gray-800">Student List</h2>
+                <div id="bulk-update-container" class="flex items-center gap-2 flex-wrap">
+                    <label for="bulkDate" class="text-sm font-medium text-gray-700">Select Date:</label>
+                    <input type="date" id="bulkDate" class="border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2">
+                </div>
+            </div>
+            <div class="max-h-96 overflow-y-auto border rounded-lg">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">USN</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- Student rows will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-xs text-gray-500 mt-2">
+                User ID: <span id="userId" class="font-mono">Loading...</span>
+            </div>
+        </div>
+        
+        <div id="attendance-section" class="hidden">
+            <div class="text-center mb-8 bg-white p-6 rounded-2xl shadow-lg">
+                <h2 class="text-2xl font-bold text-gray-800">Attendance for <span id="selectedStudentName" class="text-blue-600"></span></h2>
+                <p class="text-sm text-gray-500">USN: <span id="selectedStudentUsn" class="font-mono"></span></p>
+            </div>
+        
+            <main id="calendar-container" class="space-y-8">
+                <!-- Calendars will be generated here -->
+            </main>
+        
+            <footer class="mt-8 bg-white p-6 rounded-2xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">Attendance Summary</h2>
+                <div id="summary" class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
+                    <div class="bg-green-100 text-green-800 p-4 rounded-lg">
+                        <p class="text-2xl font-bold" id="present-count">0</p>
+                        <p class="text-sm">Present</p>
+                    </div>
+                    <div class="bg-red-100 text-red-800 p-4 rounded-lg">
+                        <p class="text-2xl font-bold" id="absent-count">0</p>
+                        <p class="text-sm">Absent</p>
+                    </div>
+                </div>
+            </footer>
+        </div>
+
+        <div id="placeholder-section" class="text-center py-20 bg-white rounded-2xl shadow-lg">
+            <p class="text-gray-500 text-lg">Please select a student from the list to begin.</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, setLogLevel, updateDoc, deleteField, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Configuration ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "DEMO", authDomain: "DEMO", projectId: "DEMO" };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-attendance-app';
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        setLogLevel('debug');
+
+        // --- App State ---
+        let attendanceData = {};
+        let currentStudentName = null;
+        let currentStudentUsn = null;
+        let currentUserId = null;
+        let unsubscribe = null;
+
+        // --- Element Selectors ---
+        const studentTableBody = document.getElementById('studentTableBody');
+        const calendarContainer = document.getElementById('calendar-container');
+        const attendanceSection = document.getElementById('attendance-section');
+        const placeholderSection = document.getElementById('placeholder-section');
+        const selectedStudentNameEl = document.getElementById('selectedStudentName');
+        const selectedStudentUsnEl = document.getElementById('selectedStudentUsn');
+        const bulkDateEl = document.getElementById('bulkDate');
+
+        const studentList = [
+            { usn: "SG22EEG001", name: "ABDUL KAREEM" }, { usn: "SG22EEG003", name: "ABHISHEK S STHAVARMATH" },
+            { usn: "SG22EEG004", name: "ADITYA" }, { usn: "SG22EEG005", name: "AKHILESH M ANDOLKAR" },
+            { usn: "SG22EEG006", name: "ΑΜΒΙΚΑ" }, { usn: "SG22EEG007", name: "ANKITA ARVIND POTDAR" },
+            { usn: "SG22EEG008", name: "ANUSHKA" }, { usn: "SG22EEG009", name: "BABY ASHA RANI PASAR" },
+            { usn: "SG22EEG010", name: "CHETANKUMAR" }, { usn: "SG22EEG011", name: "DANESHWARI RADDEVADI" },
+            { usn: "SG22EEG012", name: "ESHWARIS SARADGI" }, { usn: "SG22EEG014", name: "MAHADEV KALSHETTY" },
+            { usn: "SG22EEG015", name: "MANOJ KUMAR BODHAN" }, { usn: "SG22EEG016", name: "MONIKA D SHASTRY" },
+            { usn: "SG22EEG017", name: "NIKITHA" }, { usn: "SG22EEG019", name: "PANCHAL JAYASHRI DEVRAJ" },
+            { usn: "SG22EEG020", name: "PAVANNARAYAN" }, { usn: "SG22EEG021", name: "PAVITRA" },
+            { usn: "SG22EEG022", name: "PRAJWAL" }, { usn: "SG22EEG023", name: "PRAJWAL" },
+            { usn: "SG22EEG024", name: "PRAJWAL MALIPATIL" }, { usn: "SG22EEG025", name: "RAGHAVENDRA" },
+            { usn: "SG22EEG026", name: "SANGANAND NEELKANTHRAO KOVI" }, { usn: "SG22EEG027", name: "SANGEETA" },
+            { usn: "SG22EEG028", name: "SHARATH KUMAR" }, { usn: "SG22EEG029", name: "SHARMILA" },
+            { usn: "SG22EEG030", name: "SHILPA" }, { usn: "SG22EEG031", name: "SHIVAPRASAD" },
+            { usn: "SG22EEG032", name: "SHREYA" }, { usn: "SG22EEG033", name: "SHREYAS CHAVAN" },
+            { usn: "SG22EEG034", name: "SHRUSTI" }, { usn: "SG22EEG035", name: "SIDDESHWAR ANGADI" },
+            { usn: "SG22EEG036", name: "SUJATA HIREMAΑΤΗ" }, { usn: "SG22EEG037", name: "SUMEET" },
+            { usn: "SG22EEG038", name: "VAISHNAVI HIREMATH" }, { usn: "SG22EEG039", name: "VAISHNAVI U GUDAGERI" },
+            { usn: "SG22EEG040", name: "VINAYAK" }
+        ];
+
+        const startDate = new Date(new Date().getFullYear(), 8, 16);
+        const endDate = new Date(startDate.getFullYear() + 1, 1, 16);
+        
+        // --- UI Helpers ---
+        function showCustomAlert(message, type = 'info') {
+            const bgColor = type === 'success' ? '#4ade80' : (type === 'error' ? '#f87171' : '#60a5fa');
+            const alertBox = document.createElement('div');
+            alertBox.style.cssText = `position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: ${bgColor}; color: white; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1001; font-size: 14px;`;
+            alertBox.textContent = message;
+            document.body.appendChild(alertBox);
+            setTimeout(() => {
+                alertBox.style.transition = 'opacity 0.5s';
+                alertBox.style.opacity = '0';
+                setTimeout(() => alertBox.remove(), 500);
+            }, 3000);
+        }
+        
+        function updateDropdownStyle(dropdown) {
+            dropdown.classList.remove('bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-white', 'font-semibold');
+            if(dropdown.value) dropdown.classList.add('font-semibold');
+            switch (dropdown.value) {
+                case 'P': dropdown.classList.add('bg-green-100', 'text-green-800'); break;
+                case 'A': dropdown.classList.add('bg-red-100', 'text-red-800'); break;
+                default: dropdown.classList.add('bg-white'); break;
+            }
+        }
+
+        // --- Core Functions ---
+        function populateStudentList() {
+            studentTableBody.innerHTML = '';
+            studentList.forEach(student => {
+                const row = document.createElement('tr');
+                row.className = 'student-row hover:bg-gray-100 transition-colors';
+                row.dataset.usn = student.usn;
+                row.dataset.name = student.name;
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 cursor-pointer">${student.usn}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 cursor-pointer">${student.name}</td>
+                    <td class="px-6 py-2 whitespace-nowrap text-sm text-gray-500">
+                         <select class="status-dropdown border-gray-300 rounded-md shadow-sm w-full p-2 text-sm focus:border-blue-500 focus:ring-blue-500 transition" disabled>
+                            <option value="">N/A</option>
+                            <option value="P">Present</option>
+                            <option value="A">Absent</option>
+                        </select>
+                    </td>`;
+                row.querySelector('.status-dropdown').addEventListener('change', handleStatusChangeFromTable);
+                row.querySelectorAll('td:not(:last-child)').forEach(cell => {
+                    cell.addEventListener('click', () => handleStudentSelect(row));
+                });
+                studentTableBody.appendChild(row);
+            });
+        }
+
+        async function handleStatusChangeFromTable(event) {
+            const dropdown = event.target;
+            const row = dropdown.closest('tr');
+            const usn = row.dataset.usn;
+            const name = row.dataset.name;
+            const newStatus = dropdown.value;
+            const date = bulkDateEl.value;
+
+            if (!date || !usn || !currentUserId) {
+                showCustomAlert('Cannot update status. Please select a date first.', 'error');
+                return;
+            }
+
+            try {
+                const docRef = doc(db, `artifacts/${appId}/users/${currentUserId}/attendance/${usn}`);
+                if (newStatus === '') {
+                    await updateDoc(docRef, { [`data.${date}`]: deleteField() }).catch(err => { if (err.code !== 'not-found') throw err; });
+                } else {
+                    await setDoc(docRef, { usn, name, data: { [date]: newStatus } }, { merge: true });
+                }
+                updateDropdownStyle(dropdown);
+                if (usn === currentStudentUsn) {
+                    if (newStatus === '') delete attendanceData[date];
+                    else attendanceData[date] = newStatus;
+                    updateUI();
+                }
+            } catch (error) {
+                console.error("Error updating status from table:", error);
+                showCustomAlert('Failed to update status.', 'error');
+            }
+        }
+
+        async function updateStatusColumn(date) {
+            const dropdowns = document.querySelectorAll('.status-dropdown');
+            if (!date || !currentUserId) {
+                dropdowns.forEach(dropdown => {
+                    dropdown.value = '';
+                    dropdown.disabled = true;
+                    updateDropdownStyle(dropdown);
+                });
+                return;
+            }
+            dropdowns.forEach(dropdown => {
+                dropdown.disabled = false;
+            });
+            
+            const promises = studentList.map(student => getDoc(doc(db, `artifacts/${appId}/users/${currentUserId}/attendance/${student.usn}`)));
+            
+            try {
+                 const docSnaps = await Promise.all(promises);
+                 docSnaps.forEach((docSnap, index) => {
+                    const student = studentList[index];
+                    let status = '';
+                    if (docSnap.exists()) {
+                        const studentData = docSnap.data().data || {};
+                        status = studentData[date] || '';
+                    }
+                    const row = studentTableBody.querySelector(`tr[data-usn="${student.usn}"]`);
+                    if(row) {
+                        const dropdown = row.querySelector('.status-dropdown');
+                        dropdown.value = status;
+                        updateDropdownStyle(dropdown);
+                    }
+                 });
+            } catch(error) {
+                console.error("Error fetching statuses for column:", error);
+                showCustomAlert('Could not fetch daily statuses.', 'error');
+            }
+        }
+
+
+        function handleStudentSelect(selectedRow) {
+            currentStudentUsn = selectedRow.dataset.usn;
+            currentStudentName = selectedRow.dataset.name;
+            document.querySelectorAll('.student-row').forEach(row => row.classList.remove('selected'));
+            selectedRow.classList.add('selected');
+            selectedStudentNameEl.textContent = currentStudentName;
+            selectedStudentUsnEl.textContent = currentStudentUsn;
+            placeholderSection.classList.add('hidden');
+            attendanceSection.classList.remove('hidden');
+            setupFirestoreListener();
+        }
+        
+        function generateCalendars() {
+            calendarContainer.innerHTML = '';
+            let currentDate = new Date(startDate);
+            while (currentDate.getFullYear() < endDate.getFullYear() || currentDate.getMonth() <= endDate.getMonth()) {
+                const month = currentDate.getMonth(), year = currentDate.getFullYear();
+                const monthName = currentDate.toLocaleString('default', { month: 'long' });
+                const monthDiv = document.createElement('div');
+                monthDiv.className = 'bg-white p-6 rounded-2xl shadow-lg';
+                monthDiv.innerHTML = `<h3 class="text-xl font-semibold mb-4 text-center">${monthName} ${year}</h3><div class="calendar-grid text-xs text-center font-semibold text-gray-500 mb-2"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>`;
+                const calendarGrid = document.createElement('div');
+                calendarGrid.className = 'calendar-grid';
+                const firstDay = new Date(year, month, 1).getDay();
+                for (let i = 0; i < firstDay; i++) calendarGrid.appendChild(document.createElement('div'));
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dayCell = document.createElement('div'), fullDate = new Date(year, month, day);
+                    dayCell.className = 'day flex items-center justify-center h-10 sm:h-12 rounded-lg text-sm border';
+                    dayCell.textContent = day;
+                    dayCell.dataset.date = fullDate.toISOString().split('T')[0];
+                    if (fullDate >= startDate && fullDate <= endDate) {
+                        dayCell.classList.add('cursor-pointer');
+                        dayCell.addEventListener('click', handleDayClick);
+                    } else dayCell.classList.add('disabled');
+                    calendarGrid.appendChild(dayCell);
+                }
+                monthDiv.appendChild(calendarGrid);
+                calendarContainer.appendChild(monthDiv);
+                currentDate.setMonth(currentDate.getMonth() + 1);
+            }
+        }
+
+        function handleDayClick(event) {
+            if (!currentStudentUsn) return;
+            const date = event.target.dataset.date;
+            const currentStatus = attendanceData[date];
+            const statuses = [undefined, 'P', 'A'];
+            const nextStatusIndex = (statuses.indexOf(currentStatus) + 1) % statuses.length;
+            attendanceData[date] = statuses[nextStatusIndex];
+            if (attendanceData[date] === undefined) delete attendanceData[date];
+            saveAttendance();
+            if (date === bulkDateEl.value) {
+                const row = studentTableBody.querySelector(`tr[data-usn="${currentStudentUsn}"]`);
+                if (row) {
+                    const dropdown = row.querySelector('.status-dropdown');
+                    dropdown.value = attendanceData[date] || '';
+                    updateDropdownStyle(dropdown);
+                }
+            }
+        }
+
+        function updateUI() {
+            document.querySelectorAll('.day[data-date]').forEach(cell => {
+                const date = cell.dataset.date;
+                cell.classList.remove('present', 'absent', 'late', 'bg-white', 'border-gray-200');
+                const status = attendanceData[date];
+                if (status === 'P') cell.classList.add('present');
+                else if (status === 'A') cell.classList.add('absent');
+                else cell.classList.add('bg-white', 'border-gray-200');
+            });
+            updateSummary();
+        }
+
+        function updateSummary() {
+            const counts = { P: 0, A: 0 };
+            Object.values(attendanceData).forEach(status => {
+                if (counts[status] !== undefined) counts[status]++;
+            });
+            document.getElementById('present-count').textContent = counts.P;
+            document.getElementById('absent-count').textContent = counts.A;
+        }
+
+        async function saveAttendance() {
+            if (!currentUserId || !currentStudentUsn) return;
+            try {
+                const docRef = doc(db, `artifacts/${appId}/users/${currentUserId}/attendance/${currentStudentUsn}`);
+                await setDoc(docRef, { usn: currentStudentUsn, name: currentStudentName, data: attendanceData }, { merge: true });
+            } catch (error) { console.error("Error saving attendance: ", error); }
+        }
+        
+        function setupFirestoreListener() {
+            if (unsubscribe) unsubscribe();
+            if (!currentUserId || !currentStudentUsn) {
+                attendanceData = {}; updateUI(); return;
+            }
+            const docRef = doc(db, `artifacts/${appId}/users/${currentUserId}/attendance/${currentStudentUsn}`);
+            unsubscribe = onSnapshot(docRef, (doc) => {
+                attendanceData = doc.exists() ? (doc.data().data || {}) : {};
+                updateUI();
+            }, (error) => console.error("Firestore listener error: ", error));
+        }
+
+        // --- Initialization ---
+        
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/service-worker.js').then(registration => {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            }, err => {
+              console.log('ServiceWorker registration failed: ', err);
+            });
+          });
+        }
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUserId = user.uid;
+                document.getElementById('userId').textContent = currentUserId;
+                populateStudentList();
+                generateCalendars(); 
+                bulkDateEl.addEventListener('change', (e) => updateStatusColumn(e.target.value));
+
+                // --- Automatically select a default date ---
+                const today = new Date();
+                let defaultDate = today;
+
+                if (today < startDate) {
+                    defaultDate = startDate;
+                } else if (today > endDate) {
+                    defaultDate = endDate;
+                }
+                
+                const defaultDateString = defaultDate.toISOString().split('T')[0];
+                bulkDateEl.value = defaultDateString;
+                updateStatusColumn(defaultDateString);
+
+            } else {
+                currentUserId = null;
+            }
+        });
+
+        async function init() {
+            try {
+                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (token) await signInWithCustomToken(auth, token);
+                else await signInAnonymously(auth);
+            } catch (error) { console.error("Authentication failed:", error); }
+        }
+
+        init();
+    </script>
+</body>
+</html>
+
