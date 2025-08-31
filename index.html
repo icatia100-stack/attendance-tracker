@@ -79,7 +79,7 @@
                 </table>
             </div>
             <div class="text-xs text-gray-500 mt-2">
-                User ID: <span id="userId" class="font-mono">Loading...</span>
+                User ID: <span id="userId" class="font-mono">Connecting...</span>
             </div>
         </div>
         
@@ -260,9 +260,6 @@
                 });
                 return;
             }
-            dropdowns.forEach(dropdown => {
-                dropdown.disabled = false;
-            });
             
             const promises = studentList.map(student => getDoc(doc(db, `artifacts/${appId}/users/${currentUserId}/attendance/${student.usn}`)));
             
@@ -278,6 +275,7 @@
                     const row = studentTableBody.querySelector(`tr[data-usn="${student.usn}"]`);
                     if(row) {
                         const dropdown = row.querySelector('.status-dropdown');
+                        dropdown.disabled = false;
                         dropdown.value = status;
                         updateDropdownStyle(dropdown);
                     }
@@ -409,11 +407,9 @@
             if (user) {
                 currentUserId = user.uid;
                 document.getElementById('userId').textContent = currentUserId;
-                populateStudentList();
-                generateCalendars(); 
+                
                 bulkDateEl.addEventListener('change', (e) => updateStatusColumn(e.target.value));
 
-                // --- Automatically select a default date ---
                 const today = new Date();
                 let defaultDate = today;
 
@@ -429,18 +425,30 @@
 
             } else {
                 currentUserId = null;
+                document.getElementById('userId').textContent = "Connection failed. Data will not be saved.";
+                showCustomAlert("Could not connect to database. Please check your connection.", "error");
             }
         });
-
-        async function init() {
+        
+        async function initAuth() {
             try {
                 const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
                 if (token) await signInWithCustomToken(auth, token);
                 else await signInAnonymously(auth);
-            } catch (error) { console.error("Authentication failed:", error); }
+            } catch (error) { 
+                console.error("Authentication failed:", error);
+                document.getElementById('userId').textContent = "Connection failed. Data will not be saved.";
+            }
         }
 
-        init();
+        function main() {
+            populateStudentList();
+            generateCalendars(); 
+            initAuth();
+        }
+
+        main();
     </script>
 </body>
 </html>
+
